@@ -36,7 +36,7 @@ jobs:
           REVIEW=$(kiro-cli chat \
             --agent code-reviewer \
             --no-interactive \
-            --prompt "Review these changed files for security issues, bugs, and best practice violations: ${{ steps.changed.outputs.files }}")
+            "Review these changed files for security issues, bugs, and best practice violations: ${{ steps.changed.outputs.files }}")
           echo "$REVIEW" > /tmp/raw_review.txt
 
       - name: Post-process output
