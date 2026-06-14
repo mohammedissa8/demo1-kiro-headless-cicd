@@ -1,91 +1,120 @@
 # Demo Script: Kiro CLI Headless in CI/CD
 
-## Pre-requisites
-- GitHub repo with this demo code pushed
-- `KIRO_API_KEY` added as GitHub Secret (Settings → Secrets → Actions)
-- Branch protection enabled on `main`
-- Kiro CLI installed locally for the containerized demo
+**Repo:** https://github.com/mohammedissa8/demo1-kiro-headless-cicd
 
-## Demo 1: GitHub Actions PR Review (~5 min)
+## How It Works (for your mental model)
 
-### Setup (before audience)
-1. Push this demo repo to GitHub
-2. Create a `main` branch with clean code
-3. Prepare a feature branch with a deliberate bug (e.g., hardcoded secret, missing error handling)
+- GitHub Actions runs on **GitHub's servers** (ephemeral Ubuntu VMs), NOT your machine
+- When you push/open a PR, GitHub spins up a fresh VM, installs Kiro CLI there, runs the review, posts the comment — all remotely
+- Your local Kiro CLI is not involved after `git push`
+- You watch it happen in the **Actions** tab in your browser
 
-### Live Demo Steps
+## Setup (done once, before demo)
 
-**Step 1: Show the agent config**
+### 1. Add the API key secret
+- Repo → Settings → Secrets and variables → Actions → New repository secret
+- Name: `KIRO_API_KEY`
+- Value: your Kiro API key from https://app.kiro.dev (Settings → API Keys)
+
+### 2. Enable branch protection on main
+- Repo → Settings → Branches → Add branch protection rule
+- Branch name pattern: `main`
+- Check: ✅ Require a pull request before merging
+- Click Create
+
+### 3. Prepare the demo bug branch (before audience)
 ```bash
-cat .kiro/agents/code-reviewer.json
-```
-Key points: read/grep only, no shell, categorizes by severity.
+git clone git@github.com:mohammedissa8/demo1-kiro-headless-cicd.git
+cd demo1-kiro-headless-cicd
+git checkout -b dem0-bug
+mkdir -p src
+cat > src/payment.js << 'EOF'
+const API_KEY = "sk-live-1234567890abcdef";
 
-**Step 2: Show the steering file**
-```bash
-cat .kiro/steering/ci-context.md
-```
-Key points: team's standards encoded, same file guides humans AND the CI agent.
+async function chargeCustomer(amount) {
+  const response = await fetch("https://api.stripe.com/v1/charges", {
+    headers: { Authorization: `Bearer ${API_KEY}` }
+  });
+  return response.json();
+}
 
-**Step 3: Show the workflow**
-```bash
-cat .github/workflows/kiro-code-review.yml
-```
-Walk through: trigger → install (~13s) → get diff → run Kiro → post-process → comment.
-
-**Step 4: Open a PR with a bug**
-```bash
-git checkout -b demo-bug
-# Introduce a bug (e.g., add `const API_KEY = "sk-1234..."` in a file)
+module.exports = { chargeCustomer };
+EOF
 git add . && git commit -m "feat: add payment integration"
+git push -u origin dem0-bug
+```
+Don't open the PR yet — save that for the live demo.
+
+## Live Demo (~8 min)
+
+### Step 1: Show the repo structure (1 min)
+Open https://github.com/mohammedissa8/demo1-kiro-headless-cicd in browser.
+
+Show 3 files:
+- `.kiro/agents/code-reviewer.json` — "This is the agent. Read/grep only. No shell, no write."
+- `.kiro/steering/ci-context.md` — "This is the team's standards. Same file guides humans AND the CI agent."
+- `.github/workflows/kiro-code-review.yml` — "This is the pipeline. Triggers on every PR."
+
+### Step 2: Walk through the workflow (1 min)
+Highlight the key steps:
+1. Trigger: `on: pull_request` targeting main
+2. Get changed files: `git diff --name-only` (pass only the diff, not full repo — cost efficient)
+3. Install Kiro CLI: `curl -fsSL https://cli.kiro.dev/install | bash` (~13 seconds on GitHub's VM)
+4. Run Kiro: `--agent code-reviewer --no-interactive` with API key from secrets
+5. Post-process: strip ANSI characters, format output
+6. Post as PR comment
+
+### Step 3: Open the PR (1 min)
+Either via GitHub UI:
+- Go to repo → "Compare & pull request" for `dem0-bug` branch
+- Title: "feat: add payment integration"
+- Create PR
+
+Or if showing terminal:
+```bash
 git push -u origin demo-bug
-# Open PR via GitHub UI or:
-gh pr create --title "feat: add payment integration" --base main
+# Then open PR via GitHub UI: repo page → "Compare & pull request" banner
 ```
 
-**Step 5: Watch the Action run**
-- Go to Actions tab → show it running
+### Step 4: Watch the Action run (2 min)
+- Go to Actions tab → click the running workflow
+- Expand steps as they execute
 - Point out: install ~13s, review ~47s, total ~60s
+- "This is running on GitHub's servers, not my machine"
 
-**Step 6: Show the PR comment**
-- Go back to the PR → Kiro's review appears as a comment
-- Show it caught the hardcoded secret (CRITICAL)
-- Show formatted output (post-processing worked)
+### Step 5: Show the PR comment (2 min)
+- Go back to the PR → scroll to comments
+- Kiro's review appears as "🤖 Kiro Code Review"
+- It caught: **CRITICAL — hardcoded API key** in src/payment.js
+- May also flag: missing error handling on fetch, no input validation on amount
 
-**Talking point:** "That's 1-2 hours of manual review in 60 seconds. And it runs on EVERY PR automatically."
+**Talking point:** "That's 1-2 hours of manual review done in 60 seconds. Runs on every PR automatically. The developer gets feedback before any human reviewer even looks at it."
 
-## Demo 2: Containerized Kiro (~3 min)
+### Step 6: Security message (1 min)
+- "The agent config lives in the repo — branch protection means no one can modify it without a reviewed PR"
+- "Read/grep only — the agent cannot modify code, push, or deploy"
+- "Output is advisory — the PR still needs human approval to merge"
 
-### Live Demo Steps
+## Reset for Next Demo Run
+Use a different branch name each time
 
-**Step 1: Show the Dockerfile**
-```bash
-cat Dockerfile
-```
-Key points: API key injected at runtime (never hardcoded), entry point is non-interactive.
+git checkout main
+git pull
+git checkout -b demo-bug-2
+mkdir -p src
+cat > src/db.js << 'EOF'
+const password = "admin123";
+const conn = `postgres://root:${password}@prod-db:5432/users`;
+EOF
+git add . && git commit -m "feat: add database connection"
+git push -u origin demo-bug-2
+# GitHub shows "Compare & pull request" banner → click it
 
-**Step 2: Build the container**
-```bash
-docker build -t kiro-headless .
-```
-(Pre-build if short on time — image is cached)
+## Troubleshooting
 
-**Step 3: Run it**
-```bash
-docker run -e KIRO_API_KEY=$KIRO_API_KEY kiro-headless \
-  --prompt "List 5 creative CI/CD automations you could do running inside a container"
-```
-
-**Step 4: Show output**
-- Kiro responds with use cases (incident diagnosis, chaos engineering, etc.)
-
-**Talking point:** "Same agent, same capabilities. Just running inside a container instead of your terminal. This can be a K8s pod, an ECS task, a cron job."
-
-## Key Messages to Reinforce
-
-1. **One env var** (`KIRO_API_KEY`) is the only difference between interactive and headless
-2. **Read/grep only** for review agents — no write tools in unattended CI
-3. **Post-processing is essential** — raw output needs ANSI stripping before posting
-4. **Pass the diff, not the full repo** — cost efficiency
-5. **Branch protection** — prevents anyone from modifying the agent config via PR
-6. **Advisory only** — Kiro reviews and reports, it doesn't merge or deploy
+| Issue | Fix |
+|-------|-----|
+| Action doesn't trigger | Check workflow file is on `main` branch (not just on feature branch) |
+| "KIRO_API_KEY not set" | Verify secret name matches exactly in Settings → Secrets |
+| Empty PR comment | Check post-processing step — raw output might have unexpected format |
+| Action takes too long | Kiro CLI install is cached after first run; review depends on file count |
